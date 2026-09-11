@@ -27,7 +27,9 @@ LingoFloat 是一个面向观影场景的 macOS 本地实时翻译应用：直�
   保留在 History。
 - 支持全局快捷键开始/停止转录和显示/隐藏 HUD。
 - 默认不捕获麦克风；这些选项可以在 Settings 中调整。
-- 默认允许截图。翻译请求会去重、限频并自动重试临时错误；持续失败时可点击
+- 主窗口默认正常截图，CC HUD 默认从截图中排除；可在 **Settings → Privacy**
+  中独立调整。部分 macOS 录屏工具可能不遵循窗口排除设置。
+- 翻译请求会去重、限频并自动重试临时错误；持续失败时可点击
   **Retry translation** 恢复。
 - 系统音频不经过 BlackHole 等虚拟声卡，也不会默认保存原始音频。
 
@@ -41,7 +43,7 @@ Apple Silicon Mac 可以从 [GitHub Releases](https://github.com/Whale-Dolphin/L
 `.dmg.sha256`；下载后可以校验：
 
 ```bash
-shasum -a 256 -c LingoFloat-1.1.1.dmg.sha256
+shasum -a 256 -c LingoFloat-1.1.2.dmg.sha256
 ```
 
 ## 本地构建
