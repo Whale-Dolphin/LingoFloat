@@ -88,4 +88,6 @@ LINGOFLOAT_XCODE_DIR=/Applications/Xcode.app/Contents/Developer \
 
 ## 许可证
 
-LingoFloat 使用 [MIT License](LICENSE)，并保留上游版权声明。
+LingoFloat 使用 [PolyForm Noncommercial License 1.0.0](LICENSE)。
+第三方材料继续遵循各自的原始许可，详见
+[Third-Party Notices](THIRD_PARTY_NOTICES.md)。

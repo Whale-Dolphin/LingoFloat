@@ -193,7 +193,7 @@ private struct AboutSeeForYourselfCard: View {
     var body: some View {
         SettingsCard(
             title: "Don't take my word for it",
-            footer: "MIT license. The repo is exactly what you run — no hidden binary, no extra server."
+            footer: "PolyForm Noncommercial 1.0.0. The repo is exactly what you run — no hidden binary, no extra server."
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Everything LingoFloat does sits in the open. Read the source, audit what leaves your machine, build your own copy — every privacy claim on this screen is something you can confirm yourself in the code.")
@@ -322,8 +322,8 @@ private struct AboutContactCard: View {
                 AboutLinkRow(
                     icon: "doc.text.fill",
                     tint: .teal,
-                    title: "License (MIT)",
-                    subtitle: "Free for any use, modification, and redistribution."
+                    title: "License (Noncommercial)",
+                    subtitle: "Use, modification, and redistribution for permitted noncommercial purposes."
                 ) {
                     open("https://github.com/Whale-Dolphin/LingoFloat/blob/main/LICENSE")
                 }

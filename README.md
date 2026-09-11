@@ -92,5 +92,6 @@ optional Deepgram or ElevenLabs backend.
 
 ## License
 
-LingoFloat is available under the [MIT License](LICENSE). Upstream copyright
-notices are retained.
+LingoFloat is distributed under the
+[PolyForm Noncommercial License 1.0.0](LICENSE). Third-party material remains
+under its respective license; see [Third-Party Notices](THIRD_PARTY_NOTICES.md).
