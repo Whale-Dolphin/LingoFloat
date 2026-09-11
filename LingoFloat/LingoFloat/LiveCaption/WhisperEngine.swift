@@ -96,6 +96,7 @@ actor WhisperEngine: TranscriptionEngine {
 
     private var pipe: WhisperKit?
     private var loadState: WhisperLoadState = .idle
+    private var preparationWaiters: [CheckedContinuation<Void, Never>] = []
 
     // Output stream of caption updates.
     nonisolated let captions: AsyncStream<Caption>
@@ -185,7 +186,21 @@ actor WhisperEngine: TranscriptionEngine {
     func prepare() async {
         guard pipe == nil else { return }
 
+        if case .loading = loadState {
+            await withCheckedContinuation { continuation in
+                preparationWaiters.append(continuation)
+            }
+            return
+        }
+
         loadState = .loading(progress: 0, message: "Loading \(modelName)…")
+        defer {
+            let waiters = preparationWaiters
+            preparationWaiters.removeAll()
+            for waiter in waiters {
+                waiter.resume()
+            }
+        }
 
         let folderPath = modelFolder.path
         guard Self.modelLooksComplete(at: folderPath) else {
@@ -432,7 +447,9 @@ actor WhisperEngine: TranscriptionEngine {
                 startedAt: startedAt,
                 updatedAt: Date()
             )
-            captionContinuation.yield(caption)
+            if case .terminated = captionContinuation.yield(caption) {
+                log.error("caption output stream is already closed while decoding remains active")
+            }
         }
 
         if effectiveFinalize {

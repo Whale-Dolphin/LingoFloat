@@ -25,6 +25,23 @@ import Testing
 @Suite("CaptionStream wiring")
 struct CaptionStreamTests {
 
+    @Test("a preload adopted by Start keeps its caption stream open", arguments: [
+        (isStillCurrent: true, isAdopted: false, shouldClose: false),
+        (isStillCurrent: false, isAdopted: true, shouldClose: false),
+        (isStillCurrent: true, isAdopted: true, shouldClose: false),
+        (isStillCurrent: false, isAdopted: false, shouldClose: true),
+    ])
+    func completedPreloadOwnership(
+        isStillCurrent: Bool,
+        isAdopted: Bool,
+        shouldClose: Bool
+    ) {
+        #expect(CaptionStream.shouldCloseCompletedPreload(
+            isStillCurrent: isStillCurrent,
+            isAdoptedByRunningStream: isAdopted
+        ) == shouldClose)
+    }
+
     // MARK: - Bootstrap
 
     @Test("attach with no prior chat id creates and saves a fresh session")

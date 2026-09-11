@@ -921,15 +921,38 @@ final class CaptionStream {
             // Sanity: if settings flipped while we were preparing, our
             // result is stale — drop it. `preloadedConfigKey == nil` means
             // someone discarded us mid-flight too.
-            if self.preloadedConfigKey != preloadKey {
+            let isStillCurrent = self.preloadedConfigKey == preloadKey
+                && self.preloadedSystemEngine === system
+            let isAdoptedByRunningStream = self.systemEngine.map {
+                ObjectIdentifier($0) == ObjectIdentifier(system)
+            } ?? false
+            if Self.shouldCloseCompletedPreload(
+                isStillCurrent: isStillCurrent,
+                isAdoptedByRunningStream: isAdoptedByRunningStream
+            ) {
                 Task {
                     await mic?.close()
                     await system.close()
                 }
+            } else if isAdoptedByRunningStream {
+                // Start can adopt the engine while prepare() is still in
+                // flight. Cancellation doesn't interrupt WhisperKit loading,
+                // so the old preload task may reach this point afterwards.
+                // The running pipeline now owns the caption stream; closing
+                // it here leaves audio + decoding alive but silently removes
+                // every subtitle and therefore every translation request.
+                self.log.info("whisper preload completed after live adoption; keeping caption stream open")
             } else {
                 self.log.info("whisper preload ready")
             }
         }
+    }
+
+    nonisolated static func shouldCloseCompletedPreload(
+        isStillCurrent: Bool,
+        isAdoptedByRunningStream: Bool
+    ) -> Bool {
+        !isStillCurrent && !isAdoptedByRunningStream
     }
 
     /// Re-runs `preloadWhisperIfNeeded()` whenever any Whisper-relevant

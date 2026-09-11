@@ -24,6 +24,7 @@ enum SystemCaptureError: Error {
     case aggregateDeviceCreationFailed(OSStatus)
     case ioProcCreationFailed(OSStatus)
     case startFailed(OSStatus)
+    case startTimedOut(seconds: Double)
     case alreadyRunning
     case formatUnavailable
     case streamDescriptionUnavailable(OSStatus)
@@ -42,6 +43,8 @@ nonisolated final class SystemCapture: @unchecked Sendable {
     private let stateQueue = DispatchQueue(label: "lingofloat.system-capture.state")
     private let ioQueue = DispatchQueue(label: "lingofloat.system-capture.io", qos: .userInitiated)
     private let listenerQueue = DispatchQueue(label: "lingofloat.system-capture.listener")
+    private let startupQueue = DispatchQueue(label: "lingofloat.system-capture.start", qos: .userInitiated)
+    private static let startTimeoutSeconds: Double = 10
 
     // CoreAudio handles
     private var tapID: AudioObjectID = kAudioObjectUnknown
@@ -78,6 +81,31 @@ nonisolated final class SystemCapture: @unchecked Sendable {
     }
 
     func start() async throws {
+        let timeoutSeconds = Self.startTimeoutSeconds
+        try await withCheckedThrowingContinuation { continuation in
+            let completion = SystemCaptureStartCompletion(continuation: continuation)
+
+            startupQueue.async { [self] in
+                do {
+                    try startSynchronously()
+                    if !completion.resolve(.success(())) {
+                        // The caller already timed out. CoreAudio offers no
+                        // cancellation API for AudioDeviceStart, so clean up
+                        // immediately if that blocking call eventually returns.
+                        stopSynchronously()
+                    }
+                } catch {
+                    _ = completion.resolve(.failure(error))
+                }
+            }
+
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeoutSeconds) {
+                _ = completion.resolve(.failure(SystemCaptureError.startTimedOut(seconds: timeoutSeconds)))
+            }
+        }
+    }
+
+    private func startSynchronously() throws {
         let alreadyRunning: Bool = stateQueue.sync { self.isRunning }
         guard !alreadyRunning else { throw SystemCaptureError.alreadyRunning }
 
@@ -149,7 +177,11 @@ nonisolated final class SystemCapture: @unchecked Sendable {
             kAudioAggregateDeviceMainSubDeviceKey:  outputUID,
             kAudioAggregateDeviceIsPrivateKey:      true,
             kAudioAggregateDeviceIsStackedKey:      false,
-            kAudioAggregateDeviceTapAutoStartKey:   true,
+            // Despite its name, `tapautostart = true` makes
+            // AudioDeviceStart block until a tapped process receives its
+            // first audio. The capture must be ready before the user presses
+            // Play, so start the aggregate immediately instead.
+            kAudioAggregateDeviceTapAutoStartKey:   false,
             kAudioAggregateDeviceSubDeviceListKey: [
                 [
                     kAudioSubDeviceUIDKey: outputUID,
@@ -222,6 +254,10 @@ nonisolated final class SystemCapture: @unchecked Sendable {
     }
 
     func stop() async {
+        stopSynchronously()
+    }
+
+    private func stopSynchronously() {
         // Stop listening for output changes BEFORE we tear stuff down.
         removeDefaultOutputListener()
 
@@ -367,7 +403,8 @@ nonisolated final class SystemCapture: @unchecked Sendable {
             kAudioAggregateDeviceMainSubDeviceKey:  outputUID,
             kAudioAggregateDeviceIsPrivateKey:      true,
             kAudioAggregateDeviceIsStackedKey:      false,
-            kAudioAggregateDeviceTapAutoStartKey:   true,
+            // Do not block the rebuild while waiting for future audio.
+            kAudioAggregateDeviceTapAutoStartKey:   false,
             kAudioAggregateDeviceSubDeviceListKey: [
                 [
                     kAudioSubDeviceUIDKey: outputUID,
@@ -553,5 +590,31 @@ nonisolated final class SystemCapture: @unchecked Sendable {
         let err = AudioObjectGetPropertyData(tapID, &address, 0, nil, &dataSize, &asbd)
         guard err == noErr else { throw SystemCaptureError.streamDescriptionUnavailable(err) }
         return asbd
+    }
+}
+
+private nonisolated final class SystemCaptureStartCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isResolved = false
+    private var continuation: CheckedContinuation<Void, Error>?
+
+    init(continuation: CheckedContinuation<Void, Error>) {
+        self.continuation = continuation
+    }
+
+    /// Returns true only for the result that resumed the waiting caller.
+    @discardableResult
+    func resolve(_ result: Result<Void, Error>) -> Bool {
+        lock.lock()
+        guard !isResolved, let continuation else {
+            lock.unlock()
+            return false
+        }
+        isResolved = true
+        self.continuation = nil
+        lock.unlock()
+
+        continuation.resume(with: result)
+        return true
     }
 }
