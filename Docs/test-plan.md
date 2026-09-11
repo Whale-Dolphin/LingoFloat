@@ -11,10 +11,11 @@
 | 清除上下文 | Clear 保存当前会话后开启空白会话，并重置识别/切句缓冲 | 临时 history + 固定 Caption | 当前字幕立即为空、旧字幕仍可从 History 读取、新会话 ID 不同 | `./scripts/test.sh` 中 `CaptionStreamTests` | 每次会话状态修改 | 逻辑回归与安装版主窗口/HUD 交互通过 |
 | 系统捕获 | 输出 16 kHz mono Float32 PCM | 本机播放已知音频 | 非静音、RMS 有界、停止后释放 | 实机 checklist | 发布前 | 尚未实机验证 |
 | 本地 ASR | PCM 产生有序英/日 caption | 代表性短音频 + WhisperKit 模型 | 非空、WER/CER 和延迟达标 | benchmark target | 模型变更 | 建议补充 |
-| Apple 翻译 | stable 源文得到对应中文 | 英中/日中固定句对 | ID 对齐、过期翻译被丢弃 | 集成测试 | 每次修改 | 部分上游覆盖 |
+| 翻译调度 | 不重复提交未变化的 partial；跨语言共用每秒 2 次上限；临时失败退避重试 | 固定 Caption 流、可推进的时钟、可控翻译函数 | 1,000 次轮询只调用一次；取消不拉黑；3 次失败后停自动重试；手动重试恢复；旧结果不污染 Clear 后的会话 | `CaptionTranslatorTests` | 每次翻译修改 | 12 项专项回归通过 |
+| Apple 翻译 | stable 源文经真实模型得到对应中文 | 4 条公开创作的日语日常句子、已安装的系统语言模型 | 非空中文、源文更新重新翻译、结果持久化 | 下方 opt-in 命令 | 本机发布前 | macOS 27 / M4 Pro 实测通过；含全套 140 项测试，0 失败 |
 | Overlay | 最新两条系统字幕显示在全屏上层 | 测试进程注入 Caption fixture | 原文译文可见、鼠标穿透 | XCUITest + 人工全屏 | 每次 UI 修改 | 建议补充 |
 | HUD 窗口 | 鼠标拖拽决定尺寸，字幕不能反向撑大窗口 | 真实 NSPanel / NSHostingView + 原生鼠标事件，注入屏幕鼠标坐标 | 八方向往返和排队事件无累计偏移、64–600pt 限制、长字幕更新不改尺寸、双屏保存不跳位、启动恢复尺寸、四角 alpha 为 0 | `./scripts/test.sh` 中 `CCHUDWindowTests` | 每次 HUD 修改 | 9 项专项回归通过；附原生视图 PNG |
-| 总链路 | 系统播放贯穿捕获、ASR、翻译和浮层 | 15–30 秒英/日测试片 | 字幕非空、无乱序、记录 P50/P95 | 实机 E2E | 发布前 | 尚未实机验证 |
+| 总链路 | 系统播放贯穿捕获、ASR、翻译和浮层 | 约 30 秒 Kyoko 日语测试语音，经真实 Start 启动 | 转录和对应中文可见、无翻译失败/限流 | 实机 E2E | 发布前 | 日译中短时 smoke 通过：检查时 5/5 条有译文，原会话 2/2 条恢复；未测量 P50/P95、60 分钟稳定性和识别质量 |
 
 ## 端到端边界
 
@@ -26,6 +27,30 @@ macOS 音频设备的短视频。关键阶段必须使用真实 Core Audio Proce
 每次 PR 的快速 E2E 可以在捕获边界注入 WAV，并允许用确定性翻译 fake；但
 不得 mock 重采样、切句、CaptionStream 或最终渲染。产品入口不提供写死字幕；
 UI fixture 只用于自动化测试，不替代真实 E2E。
+
+## 翻译故障回归
+
+2026-09-11 的实际故障日志为 `Translation rate limit reached`，系统错误
+`TranslationErrorDomain Code=15`。旧调度器对未变化的 partial 重复请求，
+10 秒内产生 326 次调用，并把取消/临时错误记录为永久失败。
+
+实际 Apple 模型集成测试要求 macOS 26.4+，并预先在 App 中安装日语和中文；
+默认单元测试不下载模型。以下命令开启真实模型测试：
+
+```sh
+env DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+  TEST_RUNNER_LINGOFLOAT_REAL_TRANSLATION=1 xcodebuild \
+  -project LingoFloat/LingoFloat.xcodeproj -scheme LingoFloat \
+  -destination 'platform=macOS,arch=arm64' \
+  -clonedSourcePackagesDirPath .build/SourcePackages \
+  -derivedDataPath .build/TranslationTests \
+  -only-testing:LingoFloatTests/CaptionTranslatorTests \
+  CODE_SIGNING_ALLOWED=NO test
+```
+
+确定性调度测试仅替换 Apple API 响应，保留真实 CaptionStream、切换会话和
+磁盘持久化路径。opt-in 测试进一步接入真实 Apple `lowLatency` 翻译模型；
+系统音频捕获到 HUD 的总链路仍需通过真实 App 的 Start 入口验证。
 
 ## 第一版发布门槛
 

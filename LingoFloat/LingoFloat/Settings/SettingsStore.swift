@@ -67,7 +67,7 @@ final class SettingsStore {
 
     // MARK: - Privacy
 
-    /// When true (default), every app NSWindow has its `sharingType`
+    /// When true, every app NSWindow has its `sharingType`
     /// set to `.none`, which makes the window completely invisible to ANY
     /// screen-capture tool: Zoom / Teams / Webex screen share, OBS,
     /// `screencapture` CLI, ScreenCaptureKit. The window doesn't render
@@ -580,7 +580,7 @@ final class SettingsStore {
         let defaults = UserDefaults.standard
 
         if defaults.object(forKey: Keys.windowsHiddenFromCapture) == nil {
-            self.windowsHiddenFromCapture = true
+            self.windowsHiddenFromCapture = false
         } else {
             self.windowsHiddenFromCapture = defaults.bool(forKey: Keys.windowsHiddenFromCapture)
         }

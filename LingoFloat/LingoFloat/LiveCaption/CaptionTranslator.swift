@@ -9,8 +9,8 @@ import Translation
 /// Translation (or the top-level "Translation" menu).
 ///
 /// Lives at app scope, alongside `CaptionStream` and `SettingsStore`.
-/// The translation engine itself is driven by SwiftUI: Apple only
-/// exposes a session through the `.translationTask` view modifier, so
+/// The translation engine uses SwiftUI's `.translationTask` for download
+/// prompts and compatibility with macOS 15, so
 /// `TranslationHostView` mounts one invisible View per source language
 /// and hands us the session on each (re)configuration.
 ///
@@ -31,9 +31,8 @@ import Translation
 ///        entry; each mounts a `.translationTask` and calls our
 ///        `run(session:source:)` when the session opens.
 ///   2. `run(session:source:)` loops while not cancelled:
-///        - Drains every caption of that source language needing
-///          translation right now.
-///        - Sleeps 250 ms when the queue is empty.
+///        - Translates changed text at a bounded rate, newest captions first.
+///        - Backs off on temporary failures and recreates the Apple session.
 ///   3. User changes target language → configurations recompute →
 ///      SwiftUI cancels old sessions, opens new ones with new target.
 ///   4. User changes language selection → configurations recompute →
@@ -46,9 +45,9 @@ import Translation
 ///   - source language equals target — excluded from sessions entirely;
 ///   - finalized + already translated to current target — idempotent.
 ///
-/// Interim (non-final) captions DO get translated, live, every poll.
-/// The `inFlight` throttle caps us at one outstanding request per
-/// caption ID, and we drop interim text below 4 visible characters.
+/// Interim captions are translated only when their source text changes.
+/// Requests across all source sessions share a two-per-second ceiling;
+/// interim text below four visible characters waits for more speech.
 @MainActor
 @Observable
 final class CaptionTranslator {
@@ -70,9 +69,31 @@ final class CaptionTranslator {
     /// all sessions so two sessions don't translate the same caption race.
     @ObservationIgnored private var inFlight: Set<UUID> = []
 
-    /// Caption IDs whose translation Apple has refused (e.g. "language pair
-    /// not supported on this device"). Cleared on target/selection change.
-    @ObservationIgnored private var permanentlyFailed: Set<UUID> = []
+    private struct Input: Equatable {
+        let text: String
+        let source: Language
+        let target: Language
+    }
+
+    private struct Failure {
+        let input: Input
+        let isFinal: Bool
+        let attempts: Int
+        let retryAt: Date
+        let unsupported: Bool
+    }
+
+    @ObservationIgnored private var succeeded: [UUID: Input] = [:]
+    @ObservationIgnored private var failures: [UUID: Failure] = [:]
+    @ObservationIgnored private var sourceRetryAt: [Language: Date] = [:]
+    @ObservationIgnored private var nextRequestAt = Date.distantPast
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var activeSessionID: String?
+    private(set) var issues: [Language: String] = [:]
+
+    var translationIssue: String? {
+        issues.keys.sorted { $0.rawValue < $1.rawValue }.first.flatMap { issues[$0] }
+    }
 
     /// Caption IDs the user explicitly asked to translate from the Main HUD
     /// context menu, keyed by the source language they chose (or the source
@@ -101,12 +122,6 @@ final class CaptionTranslator {
     /// entries always contribute. Each surviving entry becomes one
     /// `.translationTask` session in `TranslationHostView`.
     ///
-    /// `permanentlyFailed` is intentionally NOT reset here: this rebuild
-    /// runs on every manual request and on auto-pipeline toggles, but a
-    /// caption that Apple refused once still won't translate. The reset
-    /// belongs to the settings-observation callback below, where target /
-    /// selection changes might legitimately resurrect a previously-failed
-    /// caption.
     private func recomputeConfigurations() {
         guard let settings, let stream else {
             configurations = [:]
@@ -115,6 +130,12 @@ final class CaptionTranslator {
 
         let target = settings.translationTargetLanguage
         let targetLocale = Locale.Language(identifier: target.bcp47)
+
+        if activeSessionID != stream.activeSession.id {
+            activeSessionID = stream.activeSession.id
+            resetRequests()
+            pendingManual.removeAll()
+        }
 
         var sourceLangs: Set<Language> = []
 
@@ -145,10 +166,17 @@ final class CaptionTranslator {
 
         var newConfigs: [Language: TranslationSession.Configuration] = [:]
         for lang in sourceLangs {
-            newConfigs[lang] = TranslationSession.Configuration(
-                source: Locale.Language(identifier: lang.bcp47),
-                target: targetLocale
-            )
+            if configurationTarget == target, let existing = configurations[lang] {
+                newConfigs[lang] = existing
+            } else {
+                var configuration = TranslationSession.Configuration(
+                    source: Locale.Language(identifier: lang.bcp47), target: targetLocale
+                )
+                #if compiler(>=6.3)
+                if #available(macOS 26.4, *) { configuration.preferredStrategy = .lowLatency }
+                #endif
+                newConfigs[lang] = configuration
+            }
         }
         configurations = newConfigs
         configurationTarget = target
@@ -168,7 +196,7 @@ final class CaptionTranslator {
             _ = self.stream?.languages.selectedLanguages
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
-                self?.permanentlyFailed.removeAll()
+                self?.resetRequests()
                 self?.recomputeConfigurations()
                 self?.observeSettings()
             }
@@ -180,6 +208,7 @@ final class CaptionTranslator {
     private func observeCaptions() {
         withObservationTracking { [weak self] in
             _ = self?.stream?.captions
+            _ = self?.stream?.activeSession.id
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.recomputeConfigurations()
@@ -203,8 +232,27 @@ final class CaptionTranslator {
     /// translation) — the old text stays visible until the new one lands.
     func requestManualTranslation(captionID: UUID, sourceLanguage: Language) {
         pendingManual[captionID] = sourceLanguage
-        permanentlyFailed.remove(captionID)
+        failures.removeValue(forKey: captionID)
+        sourceRetryAt.removeValue(forKey: sourceLanguage)
         recomputeConfigurations()
+        configurations[sourceLanguage]?.invalidate()
+    }
+
+    /// Explicit retry also reopens the Apple sessions; a cancelled session
+    /// must not be reused indefinitely.
+    func retryTranslations() {
+        resetRequests()
+        for source in sourcesNeedingTranslation {
+            configurations[source]?.invalidate()
+        }
+    }
+
+    private func resetRequests() {
+        generation += 1
+        succeeded.removeAll()
+        failures.removeAll()
+        sourceRetryAt.removeAll()
+        issues.removeAll()
     }
 
     // MARK: - Queue
@@ -213,6 +261,13 @@ final class CaptionTranslator {
     /// order so `ForEach` in the host view doesn't thrash on dict key sets.
     var sourcesNeedingTranslation: [Language] {
         configurations.keys.sorted { $0.rawValue < $1.rawValue }
+    }
+
+    static func languageAvailability() -> LanguageAvailability {
+        #if compiler(>=6.3)
+        if #available(macOS 26.4, *) { return LanguageAvailability(preferredStrategy: .lowLatency) }
+        #endif
+        return LanguageAvailability()
     }
 
     /// Captions that need translation by the given source-language session.
@@ -226,7 +281,7 @@ final class CaptionTranslator {
     ///   * **Auto** — the CC HUD pipeline. Routes by `caption.language ==
     ///     source`, system side only, only while `translationEnabled` is on,
     ///     skip captions already translated to the current target.
-    private func pending(for source: Language) -> [Caption] {
+    private func pending(for source: Language, at now: Date) -> [Caption] {
         guard let stream, let settings else { return [] }
         let target = settings.translationTargetLanguage
 
@@ -234,7 +289,12 @@ final class CaptionTranslator {
             let trimmed = cap.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return false }
             if inFlight.contains(cap.id) { return false }
-            if permanentlyFailed.contains(cap.id) { return false }
+            let input = Input(text: cap.text, source: source, target: target)
+            if let failure = failures[cap.id], failure.input == input {
+                if failure.unsupported { return false }
+                if failure.isFinal == cap.isFinal,
+                   failure.attempts >= 3 || now < failure.retryAt { return false }
+            }
 
             // Manual path wins outright when the user explicitly enqueued
             // this caption. The chosen source must match this session's
@@ -247,6 +307,8 @@ final class CaptionTranslator {
             guard settings.translationEnabled else { return false }
             guard cap.source == .system else { return false }
             if !cap.isFinal && trimmed.count < Self.minInterimChars { return false }
+            if cap.translation != nil, cap.translationLanguage == target,
+               succeeded[cap.id] == input { return false }
             if cap.isFinal, cap.translation != nil, cap.translationLanguage == target {
                 return false
             }
@@ -261,63 +323,92 @@ final class CaptionTranslator {
 
     // MARK: - Run loop
 
-    /// Driven by a `.translationTask` modifier for one specific source
-    /// language. Returns when the task is cancelled (configuration changed,
-    /// session closed, or module unmounted).
-    func run(session: TranslationSession, source: Language) async {
-        guard let stream, let settings else { return }
-        let target = settings.translationTargetLanguage
+    /// One scheduling tick, shared by the Apple session and deterministic
+    /// regression tests. The global deadline limits all language sessions
+    /// together to two requests per second, including changed partials.
+    @discardableResult
+    func translateNext(
+        source: Language, target: Language, at now: Date = Date(),
+        translate: (String) async throws -> String
+    ) async -> Bool {
+        guard let stream, let settings,
+              !Task.isCancelled, settings.translationTargetLanguage == target,
+              configurations[source] != nil,
+              now >= nextRequestAt,
+              now >= (sourceRetryAt[source] ?? .distantPast),
+              let cap = pending(for: source, at: now).last else { return false }
 
-        log.info("session opened: \(source.rawValue, privacy: .public) → \(target.rawValue, privacy: .public)")
+        let input = Input(text: cap.text, source: source, target: target)
+        let requestGeneration = generation
+        let sessionID = stream.activeSession.id
+        nextRequestAt = now.addingTimeInterval(0.5)
+        inFlight.insert(cap.id)
+        defer { inFlight.remove(cap.id) }
+        let wasManual = pendingManual[cap.id] != nil
+        log.info("translation request: source=\(source.rawValue, privacy: .public) target=\(target.rawValue, privacy: .public) chars=\(cap.text.count) final=\(cap.isFinal)")
 
-        while !Task.isCancelled {
-            let work = pending(for: source)
-            if work.isEmpty {
-                try? await Task.sleep(nanoseconds: 250_000_000) // 250 ms
-                continue
+        do {
+            let result = try await translate(cap.text).trimmingCharacters(in: .whitespacesAndNewlines)
+            try Task.checkCancellation()
+            guard generation == requestGeneration, stream.activeSession.id == sessionID,
+                  settings.translationTargetLanguage == target else { return true }
+            guard !result.isEmpty else { throw TranslationError.nothingToTranslate }
+            guard let current = stream.captions.first(where: { $0.id == cap.id }),
+                  current.text == cap.text, wasManual || current.language == source else { return true }
+            stream.setTranslation(result, sourceText: cap.text, language: target, forCaptionID: cap.id)
+            succeeded[cap.id] = input
+            failures.removeValue(forKey: cap.id)
+            sourceRetryAt.removeValue(forKey: source)
+            issues.removeValue(forKey: source)
+            if wasManual {
+                pendingManual.removeValue(forKey: cap.id)
+                recomputeConfigurations()
             }
-            for cap in work {
-                if Task.isCancelled { return }
-                // Bail if target changed — the session for the new target
-                // will handle any remaining work.
-                guard settings.translationTargetLanguage == target else { return }
-                guard !inFlight.contains(cap.id) else { continue }
-                inFlight.insert(cap.id)
-                let wasManual = pendingManual[cap.id] != nil
-                do {
-                    let captureText = cap.text
-                    let response = try await session.translate(captureText)
-                    let translated = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !translated.isEmpty {
-                        // Hand the source text we actually translated back
-                        // to the store. If the bubble's text changed while
-                        // we were awaiting, `setTranslation` will drop the
-                        // result and we'll re-translate next poll.
-                        stream.setTranslation(translated, sourceText: captureText, language: target, forCaptionID: cap.id)
-                    }
-                    if wasManual {
-                        pendingManual.removeValue(forKey: cap.id)
-                    }
-                } catch {
-                    log.warning("translate failed for \(cap.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                    permanentlyFailed.insert(cap.id)
-                    if wasManual {
-                        // Don't requeue forever — surface the failure and let
-                        // the user retry via the menu (Re-translate clears
-                        // permanentlyFailed before re-enqueueing).
-                        pendingManual.removeValue(forKey: cap.id)
-                    }
-                }
-                inFlight.remove(cap.id)
-                if wasManual {
-                    // Drop the source-language session if it's no longer
-                    // serving auto OR any other manual request.
-                    recomputeConfigurations()
-                }
+        } catch {
+            // Changing language or closing a view cancels its task. That is
+            // lifecycle control, not a failed caption or a reason to blacklist it.
+            guard !Task.isCancelled, generation == requestGeneration,
+                  stream.activeSession.id == sessionID else { return true }
+            let previous = failures[cap.id]
+            let attempts = (previous?.input == input && previous?.isFinal == cap.isFinal)
+                ? (previous?.attempts ?? 0) + 1 : 1
+            let unsupported: Bool
+            switch error {
+            case TranslationError.unsupportedSourceLanguage,
+                 TranslationError.unsupportedTargetLanguage,
+                 TranslationError.unsupportedLanguagePairing:
+                unsupported = true
+            default:
+                unsupported = false
+            }
+            let retryAt = now.addingTimeInterval([2.0, 5.0, 15.0][min(attempts - 1, 2)])
+            failures[cap.id] = Failure(input: input, isFinal: cap.isFinal, attempts: attempts,
+                                      retryAt: retryAt, unsupported: unsupported)
+            sourceRetryAt[source] = retryAt
+            issues[source] = unsupported
+                ? "\(source.displayName) → \(target.displayName) is not supported by Apple Translation."
+                : (attempts < 3 ? "Translation interrupted — retrying…" : "Translation unavailable. Try again.")
+            let nsError = error as NSError
+            log.warning("translation failed: source=\(source.rawValue, privacy: .public) attempt=\(attempts) domain=\(nsError.domain, privacy: .public) code=\(nsError.code) error=\(error.localizedDescription, privacy: .public)")
+            if !unsupported {
+                configurations[source]?.invalidate()
             }
         }
+        return true
+    }
 
-        log.info("session closed: \(source.rawValue, privacy: .public) → \(target.rawValue, privacy: .public)")
+    func run(session: TranslationSession, source: Language) async {
+        guard let settings else { return }
+        let target = settings.translationTargetLanguage
+        log.info("session opened: \(source.rawValue, privacy: .public) → \(target.rawValue, privacy: .public)")
+        defer { log.info("session closed: \(source.rawValue, privacy: .public) → \(target.rawValue, privacy: .public)") }
+        while !Task.isCancelled, settings.translationTargetLanguage == target {
+            await translateNext(source: source, target: target) { text in
+                try await session.translate(text).targetText
+            }
+            do { try await Task.sleep(for: .milliseconds(100)) }
+            catch { return }
+        }
     }
 }
 

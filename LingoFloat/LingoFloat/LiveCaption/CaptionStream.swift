@@ -733,7 +733,8 @@ final class CaptionStream {
         }
     }
 
-    private func applyCaption(_ caption: Caption) {
+    /// Ingest one normalized caption from the engine/splitter pipeline.
+    func applyCaption(_ caption: Caption) {
         if let idx = captions.firstIndex(where: { $0.id == caption.id }) {
             var merged = caption
             // Carry-forward translation ONLY for ongoing (non-final)

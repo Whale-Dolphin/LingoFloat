@@ -9,6 +9,7 @@ struct CinemaDashboard: View {
     @Environment(CaptionStream.self) private var stream
     @Environment(SettingsStore.self) private var settings
     @Environment(ChatHistoryStore.self) private var history
+    @Environment(\.captionTranslator) private var translator
 
     private var orderedCaptions: [Caption] {
         stream.captions.sorted { $0.startedAt < $1.startedAt }
@@ -17,6 +18,19 @@ struct CinemaDashboard: View {
     var body: some View {
         VStack(spacing: 0) {
             CinemaToolbar(stream: stream, history: history)
+            if let translator, let issue = translator.translationIssue {
+                HStack {
+                    Label(issue, systemImage: "exclamationmark.bubble")
+                    Spacer()
+                    Button("Retry translation") { translator.retryTranslations() }
+                        .accessibilityIdentifier("retry-translation-button")
+                }
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+                .accessibilityIdentifier("translation-issue")
+            }
             Divider().opacity(0.45)
             CaptionWorkspace(stream: stream, captions: orderedCaptions)
             Divider().opacity(0.45)
@@ -239,7 +253,7 @@ private struct LanguageRoute: View {
     }
 
     private func loadSupportedTargets() async {
-        let locales = await LanguageAvailability().supportedLanguages
+        let locales = await CaptionTranslator.languageAvailability().supportedLanguages
         let codes = Set(locales.compactMap { $0.languageCode?.identifier })
         let available = Language.allCases
             .filter { codes.contains($0.bcp47) }

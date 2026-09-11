@@ -72,8 +72,7 @@ nonisolated enum Language: String, Sendable, Hashable, Codable, CaseIterable, Id
     /// Apple Translation framework. We hand it the 2-letter code, with one
     /// remap: Whisper's `jw` becomes BCP-47 `jv` (the modern tag Apple
     /// expects). Apple Translation supports far fewer languages than Whisper
-    /// transcribes — un-mappable pairs fail at session-open time and surface
-    /// in `CaptionTranslator.permanentlyFailed`.
+    /// transcribes — unsupported pairs surface in the translation status.
     var bcp47: String {
         switch self {
         case .jw: return "jv"

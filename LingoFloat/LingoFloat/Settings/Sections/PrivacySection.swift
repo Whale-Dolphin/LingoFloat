@@ -28,7 +28,7 @@ struct PrivacySection: View {
 
             SettingsCard(
                 title: "Screen capture",
-                footer: "Single switch that applies to ALL windows. Compositor-level filtering — windows are not rendered as black to other apps, they're not there at all."
+                footer: "Off by default so screenshots and screen sharing work normally. Turn it on only when you explicitly want every LingoFloat window excluded from capture."
             ) {
                 Toggle(isOn: $store.windowsHiddenFromCapture) {
                     SettingsRowLabel(

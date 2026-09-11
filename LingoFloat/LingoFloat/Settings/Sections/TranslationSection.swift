@@ -28,7 +28,7 @@ struct TranslationSection: View {
 
             SettingsCard(
                 title: "Auto-translate captions",
-                footer: "Translation applies to the CC HUD only. The Main HUD's system column shows the original language. Uses Apple's on-device Translation framework — free, offline, ~50 ms. macOS may prompt to download a language pair the first time it's used."
+                footer: "Translations appear in the app and the subtitle overlay. Uses Apple's on-device Translation framework. macOS may prompt to download a language pair the first time it's used."
             ) {
                 Toggle(isOn: $store.translationEnabled) {
                     SettingsRowLabel(
@@ -100,7 +100,7 @@ struct TranslationSection: View {
     }
 
     private func loadSupportedTargets() async {
-        let locales = await LanguageAvailability().supportedLanguages
+        let locales = await CaptionTranslator.languageAvailability().supportedLanguages
         let codes = Set(locales.compactMap { $0.languageCode?.identifier })
         let available = Language.allCases
             .filter { codes.contains($0.bcp47) }
