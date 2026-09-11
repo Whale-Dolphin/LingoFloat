@@ -172,12 +172,17 @@ final class CCHUDWindowTests: XCTestCase {
             let expected = NSRect(x: screen.frame.minX + 80, y: screen.frame.minY + 150,
                                   width: screen.frame.width * 0.4, height: 180)
             window.setFrame(expected, display: true)
+            let appKitFrame = window.frame
             window.finishUserGeometryChange()
             await Task.yield()
-            XCTAssertEqual(window.frame, expected)
+            XCTAssertEqual(appKitFrame.minX, expected.minX, accuracy: 0.5)
+            XCTAssertEqual(appKitFrame.minY, expected.minY, accuracy: 0.5)
+            XCTAssertEqual(appKitFrame.width, expected.width, accuracy: 0.5)
+            XCTAssertEqual(appKitFrame.height, expected.height, accuracy: 0.5)
+            XCTAssertEqual(window.frame, appKitFrame)
             store.ccBackgroundColorHex = store.ccBackgroundColorHex == "#010101" ? "#020202" : "#010101"
             await Task.yield()
-            XCTAssertEqual(window.frame, expected)
+            XCTAssertEqual(window.frame, appKitFrame)
             let uuid = try XCTUnwrap(screen.wc_displayUUID)
             XCTAssertEqual(store.ccHUDHeight(forDisplayUUID: uuid), 180, accuracy: 0.5)
         }
@@ -267,7 +272,9 @@ final class CCHUDWindowTests: XCTestCase {
 
     private func makePanel() -> (CCHUDPanel, CCHUDContentView) {
         let screen = NSScreen.screens[0].frame
-        let window = CCHUDPanel(contentRect: NSRect(x: screen.minX + 300, y: screen.minY + 100,
+        // Keep enough headroom on every CI display for the tests that expand
+        // each edge by 30 points. The macOS runner is only 1024 points wide.
+        let window = CCHUDPanel(contentRect: NSRect(x: screen.midX - 350, y: screen.midY - 120,
                                                    width: 700, height: 240),
                                 styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
