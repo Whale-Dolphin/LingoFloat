@@ -1,0 +1,37 @@
+# LingoFloat 测试计划
+
+## 阶段矩阵
+
+| 阶段 | 契约 | fixture | 断言 | 命令 | 频率 | 状态 |
+|---|---|---|---|---|---|---|
+| 模型安装 | 下载目录只在三个必要 Core ML 组件完整时可用 | 临时模型目录 | 缺组件拒绝、完整目录接受、variant 匹配 | `./scripts/test.sh` | 每次修改 | 已实现并通过 |
+| 切句 | 引擎 partial/final 映射为不重不漏的 bubble | 固定 Caption 流 | ID 稳定、边界和剩余文本正确 | `./scripts/test.sh` | 每次修改 | 已实现并通过 |
+| Caption 状态 | 更新、翻译和持久化保持一致 | 临时 history 目录 | 翻译不乱序、会话可重载 | `./scripts/test.sh` | 每次修改 | 已实现并通过 |
+| 自动源语言 | 空语言选择持久化为 Auto；ASR 检测结果驱动明确的源→目标翻译会话 | 隔离 UserDefaults、英/日云端响应、Caption fixture | Whisper 不强制语言；Deepgram 使用 `multi`；ElevenLabs 开启检测；只为系统字幕和非目标语建立翻译配置 | `./scripts/test.sh` 中 `LanguageSettingsTests`、云端 Engine tests、`CaptionTranslatorTests` | 每次语言链路修改 | 已实现并通过 |
+| 清除上下文 | Clear 保存当前会话后开启空白会话，并重置识别/切句缓冲 | 临时 history + 固定 Caption | 当前字幕立即为空、旧字幕仍可从 History 读取、新会话 ID 不同 | `./scripts/test.sh` 中 `CaptionStreamTests` | 每次会话状态修改 | 逻辑回归与安装版主窗口/HUD 交互通过 |
+| 系统捕获 | 输出 16 kHz mono Float32 PCM | 本机播放已知音频 | 非静音、RMS 有界、停止后释放 | 实机 checklist | 发布前 | 尚未实机验证 |
+| 本地 ASR | PCM 产生有序英/日 caption | 代表性短音频 + WhisperKit 模型 | 非空、WER/CER 和延迟达标 | benchmark target | 模型变更 | 建议补充 |
+| Apple 翻译 | stable 源文得到对应中文 | 英中/日中固定句对 | ID 对齐、过期翻译被丢弃 | 集成测试 | 每次修改 | 部分上游覆盖 |
+| Overlay | 最新两条系统字幕显示在全屏上层 | 测试进程注入 Caption fixture | 原文译文可见、鼠标穿透 | XCUITest + 人工全屏 | 每次 UI 修改 | 建议补充 |
+| HUD 窗口 | 鼠标拖拽决定尺寸，字幕不能反向撑大窗口 | 真实 NSPanel / NSHostingView + 原生鼠标事件，注入屏幕鼠标坐标 | 八方向往返和排队事件无累计偏移、64–600pt 限制、长字幕更新不改尺寸、双屏保存不跳位、启动恢复尺寸、四角 alpha 为 0 | `./scripts/test.sh` 中 `CCHUDWindowTests` | 每次 HUD 修改 | 9 项专项回归通过；附原生视图 PNG |
+| 总链路 | 系统播放贯穿捕获、ASR、翻译和浮层 | 15–30 秒英/日测试片 | 字幕非空、无乱序、记录 P50/P95 | 实机 E2E | 发布前 | 尚未实机验证 |
+
+## 端到端边界
+
+真实入口是 `LingoFloat.app` 的 **Start** 按钮；输入是由播放器输出到当前
+macOS 音频设备的短视频。关键阶段必须使用真实 Core Audio Process Tap、
+真实 WhisperKit 模型和 Apple Translation。最终检查悬浮窗里的原文、译文、
+顺序和端到端时间。模型下载和 TCC 权限不能 mock。
+
+每次 PR 的快速 E2E 可以在捕获边界注入 WAV，并允许用确定性翻译 fake；但
+不得 mock 重采样、切句、CaptionStream 或最终渲染。产品入口不提供写死字幕；
+UI fixture 只用于自动化测试，不替代真实 E2E。
+
+## 第一版发布门槛
+
+- Debug build 和单元测试通过。
+- 首次 Start 能下载所选模型，失败可重试；已下载模型可以离线加载。
+- 实机系统音频连续运行 60 分钟不停止，耳机切换后可以恢复。
+- 原文首次出现 P95 ≤ 2.5 秒，稳定双语字幕 P95 ≤ 4 秒。
+- 英语使用 WER、日语使用 CER；结果必须按清晰对白、音乐背景和快速对白
+  三个 slice 分开报告。

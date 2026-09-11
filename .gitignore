@@ -36,7 +36,7 @@ Packages/
 # Package.resolved is checked in — pins exact versions for reproducible builds
 
 # ===== Local signing config (per-machine team ID) =====
-WhisperCaption/Local.xcconfig
+LingoFloat/Local.xcconfig
 
 # ===== Release artifacts (built locally, uploaded to Releases manually) =====
 *.dmg

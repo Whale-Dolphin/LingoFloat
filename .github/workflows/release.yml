@@ -51,17 +51,18 @@ jobs:
             echo
             echo "### Install"
             echo
-            echo "**From source (recommended)** — clone the repo, open \`WhisperCaption.xcodeproj\` in Xcode, hit ⌘R. Your local build is signed under your own Apple ID; macOS opens it silently."
+            echo "**From source (recommended)** — clone the repo, open \`LingoFloat/LingoFloat.xcodeproj\` in Xcode, and hit ⌘R. Xcode can sign the local build under your own Apple ID."
             echo
-            echo "**Pre-built \`.dmg\`** — download below. On first launch macOS will block with _\"Apple could not verify…\"_. Click **Done**, then go to **System Settings → Privacy & Security**, scroll to the bottom, click **Open Anyway**, confirm with Touch ID / password. macOS remembers this forever. Full instructions are inside the \`.dmg\` as **Read me first.txt**."
+            echo "**Pre-built \`.dmg\` (Apple Silicon)** — the app is ad-hoc signed and not Apple-notarized. On first launch macOS will block with _\"Apple could not verify…\"_. Click **Done**, then go to **System Settings → Privacy & Security**, scroll to the bottom, click **Open Anyway**, and confirm. Full instructions are inside the DMG."
             echo
             echo "### Verify the signature"
             echo
             echo '```sh'
-            echo "codesign -dvvv /Applications/WhisperCaption.app 2>&1 | grep '^Authority'"
+            echo "shasum -a 256 -c LingoFloat-${GITHUB_REF_NAME#v}.dmg.sha256"
+            echo "codesign --verify --deep --strict --verbose=2 /Applications/LingoFloat.app"
             echo '```'
             echo
-            echo "Authority should read \`Apple Development: albond.dev@proton.me (...)\`. Anything else means the binary was re-signed downstream and should not be trusted."
+            echo "The checksum must report OK. The expected bundle identifier is \`com.whaledolphin.lingofloat\` and the release signature is ad-hoc."
           } > release-notes.md
 
           echo "---"
@@ -73,7 +74,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
-            --title "WhisperCaption ${GITHUB_REF_NAME}" \
+            --title "LingoFloat ${GITHUB_REF_NAME}" \
             --notes-file release-notes.md \
             --draft
 
@@ -85,6 +86,6 @@ jobs:
 
           Next steps (run locally):
             1. ./scripts/build-release.sh ${GITHUB_REF_NAME#v}
-            2. gh release upload ${GITHUB_REF_NAME} build/WhisperCaption-${GITHUB_REF_NAME#v}.dmg
+            2. gh release upload ${GITHUB_REF_NAME} build/LingoFloat-${GITHUB_REF_NAME#v}.dmg build/LingoFloat-${GITHUB_REF_NAME#v}.dmg.sha256
             3. gh release edit ${GITHUB_REF_NAME} --draft=false
           EOF
