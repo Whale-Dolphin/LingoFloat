@@ -274,7 +274,7 @@ final class CCHUDWindowTests: XCTestCase {
         let screen = NSScreen.screens[0].frame
         // Keep enough headroom on every CI display for the tests that expand
         // each edge by 30 points. The macOS runner is only 1024 points wide.
-        let window = CCHUDPanel(contentRect: NSRect(x: screen.midX - 350, y: screen.midY - 120,
+        let window = CCHUDPanel(contentRect: NSRect(x: screen.midX - 350, y: screen.minY + 100,
                                                    width: 700, height: 240),
                                 styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
