@@ -1,103 +1,96 @@
 # LingoFloat
 
-> macOS 本地实时翻译字幕：内录系统音频，自动识别英语、日语等语音并翻译成
-> 中文，适合看美剧、动漫、直播和没有字幕的视频。
+[English](README.md) | [简体中文](README.zh-CN.md)
+
+> Local, real-time translation subtitles for macOS.
 
 [![CI](https://github.com/Whale-Dolphin/LingoFloat/actions/workflows/ci.yml/badge.svg)](https://github.com/Whale-Dolphin/LingoFloat/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Whale-Dolphin/LingoFloat)](https://github.com/Whale-Dolphin/LingoFloat/releases/latest)
 [![macOS](https://img.shields.io/badge/macOS-15%2B-black?logo=apple)](https://github.com/Whale-Dolphin/LingoFloat)
 
-LingoFloat 是一个面向观影场景的 macOS 本地实时翻译应用：直接捕获 Mac
-正在播放的系统音频，在本机完成语音识别，再把字幕翻译成指定语言并显示在
-全屏视频上方。无需 BlackHole 等虚拟声卡。
+LingoFloat captures audio playing on your Mac, transcribes it locally, and
+displays translated subtitles above full-screen video. It is designed for
+watching foreign-language shows, anime, live streams, and videos without
+subtitles. No virtual audio device is required.
 
-当前仓库是第一版可运行 MVP。它基于 MIT 许可的
-[WhisperCaption](https://github.com/albond/WhisperCaption) `v1.0.1` 开始开发，
-保留了成熟的 Core Audio Process Tap、WhisperKit、Apple Translation 和
-`NSPanel` 悬浮字幕实现，并建立了独立的产品名、Bundle ID 与数据空间。
+## Features
 
-## 主要功能
+- Capture macOS system audio directly.
+- Run speech recognition locally with WhisperKit.
+- Automatically detect the source language or select it manually.
+- Translate into Chinese and other languages supported by Apple Translation.
+- Display a movable and resizable bilingual CC HUD.
+- Start or stop transcription and toggle the HUD with global shortcuts.
+- Clear the current context from either the main window or the HUD.
+- Keep the main window visible in screenshots while excluding the CC HUD.
+- Store transcript history locally without saving raw audio by default.
 
-- 点击 **Start** 即进入真实链路：首次运行自动下载所选 WhisperKit 模型，
-  然后执行系统音频 → 16 kHz PCM → WhisperKit → Apple Translation →
-  双语悬浮字幕。应用不再提供写死字幕的假体验入口。
-- **From: Auto** 自动检测输入语言，输出语言可指定为中文或其他 Apple
-  Translation 支持的语言。
-- 主窗口和悬浮 HUD 都有 **Clear**，可以清空当前上下文并从头显示；旧内容仍
-  保留在 History。
-- 支持全局快捷键开始/停止转录和显示/隐藏 HUD。
-- 默认不捕获麦克风；这些选项可以在 Settings 中调整。
-- 主窗口默认正常截图，CC HUD 默认从截图中排除；可在 **Settings → Privacy**
-  中独立调整。部分 macOS 录屏工具可能不遵循窗口排除设置。
-- 翻译请求会去重、限频并自动重试临时错误；持续失败时可点击
-  **Retry translation** 恢复。
-- 系统音频不经过 BlackHole 等虚拟声卡，也不会默认保存原始音频。
+## Requirements
 
-## 安装
+- Apple Silicon Mac
+- macOS 15 or later
+- About 500 MB of free space for the recommended Whisper `small` model
 
-Apple Silicon Mac 可以从 [GitHub Releases](https://github.com/Whale-Dolphin/LingoFloat/releases/latest)
-下载 `LingoFloat-*.dmg`，拖入 Applications 后使用。
+## Installation
 
-当前预编译版本采用 ad-hoc 签名，尚未经过 Apple notarization。第一次打开时，
-请在 **系统设置 → 隐私与安全性** 中选择 **仍要打开**。Release 同时提供
-`.dmg.sha256`；下载后可以校验：
+Download the latest DMG from
+[GitHub Releases](https://github.com/Whale-Dolphin/LingoFloat/releases/latest),
+open it, and drag LingoFloat into Applications.
 
-```bash
-shasum -a 256 -c LingoFloat-1.1.2.dmg.sha256
-```
+The current build is ad-hoc signed and not Apple-notarized. If macOS blocks the
+first launch, open **System Settings → Privacy & Security**, click
+**Open Anyway**, and confirm.
 
-## 本地构建
+## Usage
 
-要求 macOS 15 或更高版本，以及 Xcode 16 或更高版本。本机当前完整 Xcode
-位于 `/Applications/Xcode-beta.app`，所以命令显式使用这个路径，不修改全局
-`xcode-select`：
+1. Open **Settings → Speech Recognition** and select a Whisper model.
+2. Set **From** to **Auto** or choose the spoken language.
+3. Select the desired **To** language.
+4. Click **Start** and grant Screen & System Audio Recording permission.
+5. Play a video and click **Show Overlay** to display the CC HUD.
+
+The selected model is downloaded on first use and stored under
+`~/Library/Application Support/LingoFloat/Models`.
+
+## Build from source
+
+Open `LingoFloat/LingoFloat.xcodeproj` in Xcode 16 or later and run the
+`LingoFloat` scheme, or use:
 
 ```bash
 git clone https://github.com/Whale-Dolphin/LingoFloat.git
 cd LingoFloat
-./scripts/build-demo.sh
-open .build/DerivedData/Build/Products/Debug/LingoFloat.app
+LINGOFLOAT_XCODE_DIR=/Applications/Xcode.app/Contents/Developer \
+  ./scripts/build-demo.sh
 ```
 
-也可以直接打开
-`LingoFloat/LingoFloat.xcodeproj`，选择 `LingoFloat` scheme 后按 Run。
+See [Docs/architecture.md](Docs/architecture.md) for the data flow and module
+layout.
 
-## 使用真实本地识别
+## Acknowledgements
 
-LingoFloat 负责管理模型，不要求用户安装 Hugging Face CLI 或手工选择目录：
+- [WhisperCaption](https://github.com/albond/WhisperCaption) by Albond — the
+  original MIT-licensed project on which LingoFloat was based.
+- [WhisperKit / argmax-oss-swift](https://github.com/argmaxinc/argmax-oss-swift)
+  by Argmax — on-device speech recognition and model management.
+- [Whisper](https://github.com/openai/whisper) by OpenAI — speech recognition
+  models used through WhisperKit.
+- [swift-transformers](https://github.com/huggingface/swift-transformers) by
+  Hugging Face — model and tokenizer support used through WhisperKit.
+- Apple Core Audio Process Taps, Translation, SwiftUI, AppKit, and
+  ScreenCaptureKit.
 
-1. 打开 **Settings → Speech Recognition**，选择 `small` 或 `medium`。
-2. 播放视频并点击 **Start**。
-3. 首次运行会从 `argmaxinc/whisperkit-coreml` 下载模型；`small` 约 500 MB。
-4. 按 macOS 提示授权 **Screen & System Audio Recording**，必要时重启应用。
-5. 下载完成后模型保存在 `~/Library/Application Support/LingoFloat/Models`，
-   后续可以离线启动识别。
+Additional resolved Swift package dependencies and their exact versions are
+listed in
+[Package.resolved](LingoFloat/LingoFloat.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved).
 
-真实识别依赖目标 Mac 上的模型、权限和正在播放的音频，因此单元测试不能
-替代真实音频端到端验证。测试与实机验证边界见
-[`Docs/test-plan.md`](Docs/test-plan.md)。
+## Privacy
 
-## 工程结构
+With WhisperKit selected, speech recognition and translation run on the Mac.
+Audio is sent to a remote service only when the user explicitly selects the
+optional Deepgram or ElevenLabs backend.
 
-```text
-LingoFloat/
-├── LingoFloat/
-│   ├── Capture/          # 系统音频与麦克风采集
-│   ├── LiveCaption/      # ASR、切句、翻译和字幕状态
-│   ├── Window/           # 全屏悬浮字幕 NSPanel
-│   ├── Settings/         # 本地设置和模型路径
-│   └── LingoFloatApp.swift
-├── LingoFloatTests/
-└── LingoFloatUITests/
-```
+## License
 
-详细数据流和模块边界见 [`Docs/architecture.md`](Docs/architecture.md)。
-
-## 隐私与许可
-
-选择 WhisperKit 时，ASR 与 Apple Translation 均在本机运行；首次模型下载会
-访问 Hugging Face。只有主动选择 Deepgram 或 ElevenLabs 后端时，音频才会
-发送给对应服务商。
-
-项目使用 [MIT License](LICENSE)。上游版权和完整提交历史保留在仓库中；远端
-被命名为 `upstream`，避免把个人改动误推送到原项目。
+LingoFloat is available under the [MIT License](LICENSE). Upstream copyright
+notices are retained.
