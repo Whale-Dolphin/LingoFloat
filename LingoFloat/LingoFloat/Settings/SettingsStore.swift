@@ -67,14 +67,17 @@ final class SettingsStore {
 
     // MARK: - Privacy
 
-    /// When true, every app NSWindow has its `sharingType`
-    /// set to `.none`, which makes the window completely invisible to ANY
-    /// screen-capture tool: Zoom / Teams / Webex screen share, OBS,
-    /// `screencapture` CLI, ScreenCaptureKit. The window doesn't render
-    /// even as a black rectangle — it's filtered at the compositor level.
+    /// Main and Settings windows. Keep the existing persistence key so an
+    /// explicit preference survives upgrades; CC HUD is controlled separately.
     var windowsHiddenFromCapture: Bool {
         didSet {
             UserDefaults.standard.set(windowsHiddenFromCapture, forKey: Keys.windowsHiddenFromCapture)
+        }
+    }
+
+    var ccHUDHiddenFromCapture: Bool {
+        didSet {
+            UserDefaults.standard.set(ccHUDHiddenFromCapture, forKey: Keys.ccHUDHiddenFromCapture)
         }
     }
 
@@ -584,6 +587,8 @@ final class SettingsStore {
         } else {
             self.windowsHiddenFromCapture = defaults.bool(forKey: Keys.windowsHiddenFromCapture)
         }
+        self.ccHUDHiddenFromCapture = defaults.object(forKey: Keys.ccHUDHiddenFromCapture) == nil
+            ? true : defaults.bool(forKey: Keys.ccHUDHiddenFromCapture)
 
         // Per-HUD settings — populated from the HUDDescriptor registry.
         let (op, top, spaces) = Self.loadHUDSettings(defaults: defaults)
@@ -760,6 +765,7 @@ final class SettingsStore {
 
     private enum Keys {
         static let windowsHiddenFromCapture = "LingoFloat.settings.windowsHiddenFromCapture"
+        static let ccHUDHiddenFromCapture   = "LingoFloat.settings.ccHUDHiddenFromCapture"
         static let captureMicrophone        = "LingoFloat.settings.captureMicrophone"
         static let autoScrollMainHUD        = "LingoFloat.settings.autoScrollMainHUD"
         static let mainHUDVisible           = "LingoFloat.settings.mainHUDVisible"

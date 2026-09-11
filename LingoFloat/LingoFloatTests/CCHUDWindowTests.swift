@@ -5,6 +5,90 @@ import XCTest
 
 @MainActor
 final class CCHUDWindowTests: XCTestCase {
+    func testCapturePreferencesHaveIndependentDefaultsAndPersistence() {
+        let keys = ["LingoFloat.settings.windowsHiddenFromCapture",
+                    "LingoFloat.settings.ccHUDHiddenFromCapture"]
+        let defaults = UserDefaults.standard
+        let saved = keys.map { defaults.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, saved) { defaults.set(value, forKey: key) } }
+        for key in keys { defaults.removeObject(forKey: key) }
+
+        let store = SettingsStore()
+        XCTAssertFalse(store.windowsHiddenFromCapture)
+        XCTAssertTrue(store.ccHUDHiddenFromCapture)
+        store.ccHUDHiddenFromCapture = false
+        store.windowsHiddenFromCapture = true
+        let restored = SettingsStore()
+        XCTAssertTrue(restored.windowsHiddenFromCapture)
+        XCTAssertFalse(restored.ccHUDHiddenFromCapture)
+
+        // An existing main-window preference must not become the HUD default.
+        defaults.removeObject(forKey: keys[1])
+        defaults.set(false, forKey: keys[0])
+        let upgraded = SettingsStore()
+        XCTAssertFalse(upgraded.windowsHiddenFromCapture)
+        XCTAssertTrue(upgraded.ccHUDHiddenFromCapture)
+    }
+
+    func testCapturePreferencesStayIndependentAcrossWindowLifecycle() throws {
+        let keys = ["LingoFloat.settings.windowsHiddenFromCapture",
+                    "LingoFloat.settings.ccHUDHiddenFromCapture"]
+        let defaults = UserDefaults.standard
+        let saved = keys.map { defaults.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, saved) { defaults.set(value, forKey: key) } }
+
+        for (mainHidden, hudHidden) in [(false, true), (false, false), (true, false), (true, true), (false, true)] {
+            let store = SettingsStore()
+            store.windowsHiddenFromCapture = mainHidden
+            store.ccHUDHiddenFromCapture = hudHidden
+            XCTAssertEqual(store.windowsHiddenFromCapture, mainHidden)
+            XCTAssertEqual(store.ccHUDHiddenFromCapture, hudHidden)
+
+            let defender = WindowSharingDefender(store: store)
+            let existingWindows = Set(NSApp.windows.map(ObjectIdentifier.init))
+            let controller = CCHUDController(stream: CaptionStream(), store: store)
+            controller.showDemo()
+            let hud = try XCTUnwrap(NSApp.windows.first {
+                $0.identifier == CCHUDController.windowIdentifier
+                    && !existingWindows.contains(ObjectIdentifier($0))
+            })
+
+            let main = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 320, height: 160),
+                                styleMask: [.titled], backing: .buffered, defer: false)
+            main.identifier = NSUserInterfaceItemIdentifier(HUDDescriptor.mainHUDWindowIdentifierRaw)
+            main.isReleasedWhenClosed = false
+            let settings = NSWindow(contentRect: NSRect(x: 100, y: 300, width: 320, height: 160),
+                                    styleMask: [.titled], backing: .buffered, defer: false)
+            settings.identifier = NSUserInterfaceItemIdentifier("com_apple_SwiftUI_Settings")
+            settings.isReleasedWhenClosed = false
+            main.orderFront(nil)
+            settings.orderFront(nil)
+
+            let mainType: NSWindow.SharingType = mainHidden ? .none : .readOnly
+            let hudType: NSWindow.SharingType = hudHidden ? .none : .readOnly
+            defender.applyToAllWindows()
+            XCTAssertEqual(main.sharingType, mainType, "main=\(mainHidden) cc=\(hudHidden)")
+            XCTAssertEqual(settings.sharingType, mainType, "main=\(mainHidden) cc=\(hudHidden)")
+            XCTAssertEqual(hud.sharingType, hudType, "main=\(mainHidden) cc=\(hudHidden)")
+
+            // Opening/focusing an ordinary window triggers this same global
+            // pass. It must not overwrite the nonactivating panel's preference.
+            defender.applyToAllWindows()
+            controller.showDemo()
+            XCTAssertTrue(NSApp.windows.contains { $0 === main }, "Main window must be registered")
+            XCTAssertTrue(NSApp.windows.contains { $0 === settings }, "Settings window must be registered")
+            XCTAssertTrue(NSApp.windows.contains { $0 === hud }, "HUD must be registered")
+            XCTAssertEqual(main.sharingType, mainType)
+            XCTAssertEqual(settings.sharingType, mainType)
+            XCTAssertEqual(hud.sharingType, hudType)
+
+            main.close()
+            settings.close()
+            hud.close()
+            withExtendedLifetime((controller, defender)) {}
+        }
+    }
+
     func testFirstPresentationRestoresPerDisplaySize() throws {
         let store = SettingsStore()
         let controller = CCHUDController(stream: CaptionStream(), store: store)

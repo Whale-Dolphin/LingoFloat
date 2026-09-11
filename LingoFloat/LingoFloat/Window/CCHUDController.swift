@@ -356,12 +356,12 @@ final class CCHUDController {
         w.collectionBehavior = behavior
     }
 
-    /// Mirror `windowsHiddenFromCapture` onto the panel directly —
+    /// Mirror `ccHUDHiddenFromCapture` onto the panel directly —
     /// `WindowSharingDefender` only hooks `didBecomeMainNotification`
     /// and our `.nonactivatingPanel` NSPanel never becomes main, so
     /// the defender doesn't see it.
     private func applySharingType(_ w: NSWindow) {
-        w.sharingType = store.windowsHiddenFromCapture ? .none : .readOnly
+        w.sharingType = store.ccHUDHiddenFromCapture ? .none : .readOnly
     }
 
     // MARK: - Observation
@@ -393,7 +393,7 @@ final class CCHUDController {
             _ = self.store.ccHUDCenterXFractionByDisplay
             _ = self.store.ccHUDBottomOffsetByDisplay
             _ = self.store.targetDisplayUUID
-            _ = self.store.windowsHiddenFromCapture
+            _ = self.store.ccHUDHiddenFromCapture
             _ = self.store.ccBackgroundColorHex
             _ = self.store.ccPreviousLineColorHex
             _ = self.store.ccCurrentLineColorHex

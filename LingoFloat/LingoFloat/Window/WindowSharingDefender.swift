@@ -3,17 +3,9 @@ import Foundation
 import Observation
 import OSLog
 
-/// Forces `NSWindow.sharingType = .none` on every window of the app
-/// (configurable via `SettingsStore.windowsHiddenFromCapture`). With
-/// sharing disabled, the window is excluded by the compositor from ANY
-/// screen capture path:
-///   - ScreenCaptureKit / `SCStream`
-///   - `CGWindowListCreateImage`
-///   - `screencapture` CLI
-///   - Zoom / Teams / Webex / Google Meet / OBS screen-share
-///
-/// On older macOS the window appeared as a black rectangle in screenshots;
-/// on recent macOS it's outright invisible.
+/// Applies independent capture preferences to the subtitle overlay and
+/// ordinary app windows. `sharingType` exclusion depends on the macOS
+/// capture path; it is not a guarantee against every screen recorder.
 ///
 /// Lifecycle:
 ///   - We listen for `NSWindow.didBecomeMainNotification` to catch new
@@ -45,11 +37,12 @@ final class WindowSharingDefender {
     /// Apply the current setting to every NSWindow of the app.
     /// Idempotent — safe to call as often as you want.
     func applyToAllWindows() {
-        let target: NSWindow.SharingType = store.windowsHiddenFromCapture ? .none : .readOnly
         for window in NSApp.windows {
-            window.sharingType = target
+            let hidden = HUDDescriptor.ccHUD.matches(window)
+                ? store.ccHUDHiddenFromCapture : store.windowsHiddenFromCapture
+            window.sharingType = hidden ? .none : .readOnly
         }
-        log.info("applied sharingType=\(self.describe(target), privacy: .public) to \(NSApp.windows.count) windows")
+        log.info("applied capture preferences: mainHidden=\(self.store.windowsHiddenFromCapture), ccHUDHidden=\(self.store.ccHUDHiddenFromCapture)")
     }
 
     // MARK: - Internals
@@ -59,6 +52,7 @@ final class WindowSharingDefender {
         // re-arm after each fire to keep watching.
         withObservationTracking { [self] in
             _ = store.windowsHiddenFromCapture
+            _ = store.ccHUDHiddenFromCapture
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -83,11 +77,4 @@ final class WindowSharingDefender {
         }
     }
 
-    private nonisolated func describe(_ type: NSWindow.SharingType) -> String {
-        switch type {
-        case .none: return "none (invisible to screen capture)"
-        case .readOnly: return "readOnly (visible)"
-        @unknown default: return "unknown"
-        }
-    }
 }

@@ -1,9 +1,7 @@
 import SwiftUI
 
-/// Audio-input switch + screen-capture invisibility. Per-window opacity
-/// and on-top flags live in `Windows`; `Hide from screen capture` is a
-/// privacy toggle that applies to every window the app owns, which is
-/// why it sits here.
+/// Audio inputs and independent capture preferences for the subtitle
+/// overlay and ordinary app windows. Appearance lives in `Windows`.
 struct PrivacySection: View {
 
     @Environment(SettingsStore.self) private var store
@@ -28,15 +26,25 @@ struct PrivacySection: View {
 
             SettingsCard(
                 title: "Screen capture",
-                footer: "Off by default so screenshots and screen sharing work normally. Turn it on only when you explicitly want every LingoFloat window excluded from capture."
+                footer: "By default, screenshots include the main app but exclude the subtitle overlay. Some macOS screen-recording tools may ignore window capture exclusion."
             ) {
-                Toggle(isOn: $store.windowsHiddenFromCapture) {
+                Toggle(isOn: $store.ccHUDHiddenFromCapture) {
                     SettingsRowLabel(
-                        title: "Hide from screen capture",
-                        subtitle: "Invisible to Zoom, Teams, Webex, OBS, ScreenCaptureKit, and the system screenshot tool."
+                        title: "Hide CC HUD from screen capture",
+                        subtitle: "Keep floating subtitles out of your screenshots. Does not affect the main app."
                     )
                 }
                 .toggleStyle(.switch)
+                .accessibilityIdentifier("hide-cc-hud-from-capture")
+
+                Toggle(isOn: $store.windowsHiddenFromCapture) {
+                    SettingsRowLabel(
+                        title: "Hide main app from screen capture",
+                        subtitle: "Main window and Settings only. Leave off to capture the app normally."
+                    )
+                }
+                .toggleStyle(.switch)
+                .accessibilityIdentifier("hide-main-app-from-capture")
             }
         }
     }
